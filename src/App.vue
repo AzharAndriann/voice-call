@@ -51,6 +51,7 @@ const wsStatus = ref('DISCONNECTED'); // DISCONNECTED, CONNECTING, CONNECTED, IN
 const isLoopback = ref(true); // Default loopback agar bisa langsung dites di browser
 const roomCodeInput = ref('');
 const activeRoomCode = ref('');
+const isRoomCreator = ref(false);
 const isPeerConnected = ref(false);
 const copied = ref(false);
 
@@ -81,7 +82,18 @@ const activeTab = ref('inspector'); // 'inspector', 'tamper', 'chat', 'settings'
 const chatMessages = ref([]);
 const alertMessage = ref(null);
 
+let lastAlertText = '';
+let lastAlertTime = 0;
+
 function showAlert(text, type = 'info') {
+  const now = Date.now();
+  // Cegah spam alert berulang dalam 2.5 detik agar halaman tidak bergetar/stuttering
+  if (text === lastAlertText && now - lastAlertTime < 2500) {
+    return;
+  }
+  lastAlertText = text;
+  lastAlertTime = now;
+
   alertMessage.value = { text, type };
   setTimeout(() => {
     if (alertMessage.value?.text === text) alertMessage.value = null;
@@ -129,15 +141,17 @@ function setupWebSocket() {
 
   ws.onRoomCreated = (code) => {
     activeRoomCode.value = code;
+    isRoomCreator.value = true;
     updateEncryptionKey();
-    showAlert(`Room #${code} berhasil dibuat!`, 'success');
+    showAlert(`Room #${code} berhasil dibuat! (Anda Host)`, 'success');
   };
 
   ws.onRoomJoined = (code) => {
     activeRoomCode.value = code;
+    isRoomCreator.value = false;
     isPeerConnected.value = true;
     updateEncryptionKey();
-    showAlert(`Berhasil bergabung ke Room #${code}!`, 'success');
+    showAlert(`Berhasil bergabung ke Room #${code}! (Anda Tamu)`, 'success');
   };
 
   ws.onPeerJoined = () => {
@@ -160,11 +174,19 @@ function setupWebSocket() {
     if (!activeCryptoKey) return;
     packetsReceived.value++;
 
+    // Jika kita adalah Tamu (Guest) dan Host mulai berbicara, otomatis aktifkan suara tamu
+    if (!isCallActive.value && activeRoomCode.value && !isRoomCreator.value && isPeerConnected.value) {
+      startCall();
+    }
+
     // Dekripsi paket [seq][nonce][ciphertext][tag]
     const decrypted = await decryptPacket(buffer, activeCryptoKey);
 
     if (decrypted.isValid) {
-      lastPacketInfo.value = inspectPacket(buffer);
+      // Throttle pembaruan Packet Inspector agar UI tetap ringan 60 FPS
+      if (packetsReceived.value % 20 === 0) {
+        lastPacketInfo.value = inspectPacket(buffer);
+      }
       // Putar audio jika panggilan aktif
       if (isCallActive.value) {
         const pcmArray = new Int16Array(decrypted.plaintext);
@@ -172,7 +194,9 @@ function setupWebSocket() {
       }
     } else {
       droppedPackets.value++;
-      lastPacketInfo.value = inspectPacket(buffer);
+      if (droppedPackets.value % 10 === 0) {
+        lastPacketInfo.value = inspectPacket(buffer);
+      }
       console.warn('Paket ditolak (auth tag mismatch):', decrypted.error);
     }
   };
@@ -204,11 +228,13 @@ function setupWebSocket() {
 }
 
 function handleCreateRoom() {
+  isRoomCreator.value = true;
   ws.createRoom();
 }
 
 function handleJoinRoom() {
   if (!roomCodeInput.value.trim()) return;
+  isRoomCreator.value = false;
   ws.joinRoom(roomCodeInput.value.trim());
 }
 
@@ -217,6 +243,7 @@ function handleLeaveRoom() {
   ws.leaveRoom();
   activeRoomCode.value = '';
   isPeerConnected.value = false;
+  isRoomCreator.value = false;
   showAlert('Keluar dari room', 'info');
 }
 
@@ -231,6 +258,12 @@ function copyRoomCode() {
 // Voice Call Management
 // -------------------------------------------------------------
 async function startCall() {
+  // Guard: Jangan kirim audio jika di mode server tapi lawan bicara belum ada
+  if (!isLoopback.value && !isPeerConnected.value) {
+    showAlert('Menunggu lawan bicara bergabung terlebih dahulu', 'danger');
+    return;
+  }
+
   try {
     await updateEncryptionKey();
     await audio.startRecording(async (pcmInt16Array) => {
@@ -248,7 +281,7 @@ async function startCall() {
       const sent = ws.sendBinary(encryptedPacket);
       if (sent) {
         packetsSent.value++;
-        if (packetsSent.value % 15 === 0) {
+        if (packetsSent.value % 20 === 0) {
           lastPacketInfo.value = inspectPacket(encryptedPacket);
         }
       }
@@ -420,8 +453,10 @@ onUnmounted(() => {
               <Users class="w-4 h-4 text-emerald-400" />
               Room Komunikasi
             </h2>
-            <span v-if="activeRoomCode" class="text-xs font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">
-              Active: #{{ activeRoomCode }}
+            <span v-if="activeRoomCode" class="text-xs font-mono px-2 py-0.5 rounded border flex items-center gap-1.5"
+              :class="isRoomCreator ? 'text-emerald-300 bg-emerald-950/80 border-emerald-700/60' : 'text-cyan-300 bg-cyan-950/80 border-cyan-700/60'">
+              <span class="w-1.5 h-1.5 rounded-full" :class="isRoomCreator ? 'bg-emerald-400' : 'bg-cyan-400'"></span>
+              {{ isRoomCreator ? 'HOST' : 'GUEST' }}: #{{ activeRoomCode }}
             </span>
           </div>
 
@@ -531,11 +566,21 @@ onUnmounted(() => {
             <button
               v-if="!isCallActive"
               @click="startCall"
-              :disabled="!activeRoomCode"
-              class="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-slate-950 font-bold py-3 px-4 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30"
+              :disabled="!activeRoomCode || (!isLoopback && isRoomCreator && !isPeerConnected) || (!isLoopback && !isRoomCreator)"
+              class="flex-1 font-bold py-3 px-4 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg"
+              :class="[
+                !activeRoomCode ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' :
+                (!isLoopback && isRoomCreator && !isPeerConnected) ? 'bg-amber-950/60 text-amber-300 border border-amber-600/50 cursor-not-allowed opacity-80' :
+                (!isLoopback && !isRoomCreator) ? 'bg-slate-800 text-cyan-300 border border-cyan-800/60 cursor-not-allowed opacity-80' :
+                'bg-emerald-600 hover:bg-emerald-500 text-slate-950 shadow-emerald-600/30'
+              ]"
             >
               <Phone class="w-4 h-4" />
-              <span>Mulai Panggilan Suara</span>
+              <span v-if="!activeRoomCode">Pilih / Buat Room Terlebih Dahulu</span>
+              <span v-else-if="!isLoopback && isRoomCreator && !isPeerConnected">Menunggu Lawan Bicara Join...</span>
+              <span v-else-if="!isLoopback && !isRoomCreator">Menunggu Host Memulai Panggilan...</span>
+              <span v-else-if="isRoomCreator">Mulai Panggilan Suara (Host)</span>
+              <span v-else>Mulai Panggilan Suara</span>
             </button>
 
             <button

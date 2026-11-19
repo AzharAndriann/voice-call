@@ -20,7 +20,7 @@
 export class WebSocketService {
   constructor() {
     this.ws = null;
-    this.url = 'ws://localhost:8000/websocket';
+    this.url = 'wss://outskirts-equator-capricorn.ngrok-free.dev/websocket';
     this.status = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, CONNECTED, IN_ROOM
     this.currentRoom = null;
     this.isPeerConnected = false;
@@ -187,7 +187,7 @@ export class WebSocketService {
       return;
     }
 
-    this.sendJson({ type: 'leave_room' });
+    this.sendJson({ type: 'remove_room' });
     this.currentRoom = null;
     this.isPeerConnected = false;
     this.setStatus('CONNECTED');
