@@ -675,14 +675,6 @@ onUnmounted(() => {
             <span>E2E Chat</span>
           </button>
 
-          <button
-            @click="activeTab = 'settings'"
-            class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl transition whitespace-nowrap font-medium"
-            :class="activeTab === 'settings' ? 'bg-slate-700 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          >
-            <Key class="w-3.5 h-3.5" />
-            <span>Kunci & Konfigurasi</span>
-          </button>
         </div>
 
         <!-- Tab 1: Packet Inspector -->
