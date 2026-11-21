@@ -42,13 +42,18 @@ import EncryptedChat from './components/EncryptedChat.vue';
 // -------------------------------------------------------------
 // Reactive State
 // -------------------------------------------------------------
-const ws = new WebSocketService();
+const wsUrl = import.meta.env.VITE_WS_URL?.trim();
+
+if (!wsUrl) {
+  throw new Error('VITE_WS_URL wajib diisi di file .env');
+}
+
+const ws = new WebSocketService(wsUrl);
 const audio = new AudioEngine({ sampleRate: 16000, bufferSize: 1024 });
 
 // Connection & Room
-const wsUrl = ref('ws://localhost:8000/websocket');
 const wsStatus = ref('DISCONNECTED'); // DISCONNECTED, CONNECTING, CONNECTED, IN_ROOM
-const isLoopback = ref(true); // Default loopback agar bisa langsung dites di browser
+const isLoopback = ref(false); // Default langsung terhubung ke server WebSocket
 const roomCodeInput = ref('');
 const activeRoomCode = ref('');
 const isRoomCreator = ref(false);
@@ -224,7 +229,7 @@ function setupWebSocket() {
   };
 
   // Mulai koneksi
-  ws.connect(wsUrl.value);
+  ws.connect();
 }
 
 function handleCreateRoom() {
@@ -782,8 +787,9 @@ onUnmounted(() => {
               <label class="text-slate-400 font-mono text-[11px]">Endpoint WebSocket Backend C:</label>
               <div class="flex gap-2">
                 <input
-                  v-model="wsUrl"
+                  :value="wsUrl"
                   type="text"
+                  readonly
                   class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
                 />
                 <button
@@ -794,7 +800,7 @@ onUnmounted(() => {
                 </button>
               </div>
               <p class="text-[10px] text-slate-500">
-                Default: <code>ws://localhost:8000/websocket</code> (sesuai backend Mongoose C).
+                Diambil dari <code>VITE_WS_URL</code> pada file <code>.env</code>. Restart Vite setelah mengubah nilainya.
               </p>
             </div>
           </div>

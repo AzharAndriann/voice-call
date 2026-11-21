@@ -18,9 +18,13 @@
  */
 
 export class WebSocketService {
-  constructor() {
+  constructor(url) {
+    if (!url) {
+      throw new Error('VITE_WS_URL belum dikonfigurasi di file .env');
+    }
+
     this.ws = null;
-    this.url = 'wss://outskirts-equator-capricorn.ngrok-free.dev/websocket';
+    this.url = url;
     this.status = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, CONNECTED, IN_ROOM
     this.currentRoom = null;
     this.isPeerConnected = false;
